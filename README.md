@@ -79,6 +79,69 @@ python registry/checkpoint_manager.py --list
 python registry/checkpoint_manager.py --push adapter_20260728_101500
 ```
 
+## Testing inference
+
+Setelah punya minimal 1 checkpoint, bandingkan output base model vs model hasil fine-tuning:
+
+```bash
+# bandingkan base model vs fine-tuned untuk 3 instruksi contoh
+python inference/test_inference.py --compare-base
+
+# instruksi custom, dengan panjang output lebih lega
+python inference/test_inference.py --compare-base --prompt "Jelaskan apa itu Kafka" --max-new-tokens 300
+
+# test checkpoint tertentu (bukan yang paling baru)
+python inference/test_inference.py --checkpoint adapter_20260805_103719 --compare-base
+```
+
+Script ini memuat base model 4-bit sekali saja, lalu memakai `model.disable_adapter()`
+dari `peft` untuk membandingkan perilaku dengan/tanpa adapter LoRA — tanpa perlu
+load model dua kali.
+
+## Evaluation & Findings
+
+Hasil dari checkpoint `adapter_20260805_103719` (1 epoch, ~3000 sample dari subset
+`teknium/OpenHermes-2.5`), dibandingkan base model, untuk 3 instruksi domain teknis:
+
+**1. Disambiguasi istilah — perubahan paling jelas**
+
+Ditanya "Jelaskan konsep LoRA dalam fine-tuning model bahasa", base model salah
+total: ia mengira LoRA merujuk ke LoRaWAN (teknologi radio jarak jauh untuk IoT).
+Model fine-tuned berhasil mengarahkan jawaban ke domain yang benar (low-rank
+adaptation untuk fine-tuning), meski detail teknis lanjutannya masih tidak akurat
+(halusinasi soal "basis Fourier" dan TTS). Ini indikasi paling jelas bahwa training
+berhasil menggeser model ke arah domain data training (ML/LLM engineering), bukan
+sekadar noise.
+
+**2. Language drift — model beralih ke Bahasa Inggris**
+
+Untuk pertanyaan Kafka, base model konsisten menjawab dalam Bahasa Indonesia
+(sesuai bahasa prompt), tapi model fine-tuned menjawab penuh dalam Bahasa Inggris.
+Ini kemungkinan besar karena dataset `OpenHermes-2.5` didominasi teks Inggris —
+bahkan porsi kecil dari 1 epoch training sudah cukup menggeser preferensi bahasa
+model. Ini fenomena nyata dalam fine-tuning (*language drift*/*catastrophic
+forgetting* parsial), bukan bug pipeline.
+
+**3. Jawaban lebih terstruktur, tapi rawan halusinasi detail**
+
+Secara umum, jawaban fine-tuned lebih panjang dan terstruktur (poin bernomor,
+penjelasan istilah teknis) dibanding base model yang lebih ringkas. Trade-off-nya:
+detail spesifik (statistik, nama produk, klaim teknis presisi) tidak selalu akurat
+— wajar untuk training skala kecil (1 epoch, ribuan bukan jutaan sample).
+
+### Rekomendasi perbaikan lanjutan
+
+- **Mitigasi language drift**: campurkan data Bahasa Indonesia (misal
+  `FreedomIntelligence/alpaca-gpt4-indonesian`) ke dalam training set, atau
+  filter subset OpenHermes ke percakapan yang sudah berbahasa Indonesia saja.
+- **Kurangi halusinasi**: perbesar jumlah sample training dan/atau jumlah epoch,
+  dengan tetap memantau `train_loss` di MLflow supaya tidak overfitting ke
+  dataset kecil.
+- **Evaluasi lebih sistematis**: dibanding cuma baca output secara manual,
+  pertimbangkan metrik otomatis (perplexity pada held-out set, atau LLM-as-judge)
+  untuk membandingkan checkpoint secara kuantitatif saat pipeline `--watch`
+  menghasilkan banyak checkpoint dari waktu ke waktu.
+
 ## Catatan implementasi
 
 - **Micro-batching**: `preprocessor.py` mem-flush buffer ke file JSONL berdasarkan

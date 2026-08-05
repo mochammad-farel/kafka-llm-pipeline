@@ -1,0 +1,15 @@
+artifact_uri: file:///C:/Users/user/Documents/Python%20program/kafka-llm-pipeline/mlruns/522572174175578353/8555447988194984a787508cb79f3f1b/artifacts
+end_time: 1785836655789
+entry_point_name: ''
+experiment_id: '522572174175578353'
+lifecycle_stage: active
+run_id: 8555447988194984a787508cb79f3f1b
+run_name: adapter_20260804_145940
+run_uuid: 8555447988194984a787508cb79f3f1b
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1785830383152
+status: 4
+tags: []
+user_id: user

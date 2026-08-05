@@ -10,6 +10,7 @@ Mode jalan:
 """
 
 import argparse
+import gc
 import json
 import os
 import shutil
@@ -28,7 +29,7 @@ from transformers import (
     BitsAndBytesConfig,
     TrainingArguments,
 )
-from peft import LoraConfig, get_peft_model, PeftModel
+from peft import LoraConfig, PeftModel, get_peft_model, prepare_model_for_kbit_training
 from trl import SFTTrainer
 from dotenv import load_dotenv
 
@@ -93,6 +94,8 @@ def build_model_and_tokenizer(adapter_checkpoint: Optional[str] = None):
         device_map="auto",
     )
 
+    model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
+
     if adapter_checkpoint:
         logger.info(f"Melanjutkan dari adapter checkpoint: {adapter_checkpoint}")
         model = PeftModel.from_pretrained(model, adapter_checkpoint, is_trainable=True)
@@ -107,12 +110,15 @@ def build_model_and_tokenizer(adapter_checkpoint: Optional[str] = None):
         )
         model = get_peft_model(model, lora_config)
 
+    model.config.use_cache = False
+
     return model, tokenizer
 
 
 def get_latest_checkpoint() -> Optional[str]:
     checkpoints = sorted(ADAPTER_DIR.glob("adapter_*"))
-    return str(checkpoints[-1]) if checkpoints else None
+    valid_checkpoints = [c for c in checkpoints if (c / "adapter_config.json").exists()]
+    return str(valid_checkpoints[-1]) if valid_checkpoints else None
 
 
 def run_training_cycle():
@@ -135,8 +141,9 @@ def run_training_cycle():
 
     training_args = TrainingArguments(
         output_dir=str(output_dir),
-        per_device_train_batch_size=2,
-        gradient_accumulation_steps=4,
+        per_device_train_batch_size=1,
+        gradient_accumulation_steps=8,
+        gradient_checkpointing=True,
         num_train_epochs=1,
         learning_rate=2e-4,
         logging_steps=5,
@@ -174,6 +181,11 @@ def run_training_cycle():
         shutil.move(str(batch_file), str(PROCESSED_DIR / batch_file.name))
 
     logger.info(f"{len(batch_files)} batch dipindahkan ke folder processed")
+
+    del model, trainer
+    gc.collect()
+    torch.cuda.empty_cache()
+    logger.info("GPU memory dibersihkan setelah training cycle")
 
 
 def main():

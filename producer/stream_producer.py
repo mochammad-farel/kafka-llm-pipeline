@@ -23,7 +23,7 @@ logger = logging.getLogger("producer")
 
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9094")
 RAW_TOPIC = os.getenv("RAW_TOPIC", "raw-stream")
-DATA_PATH = os.getenv("DATA_PATH", "data/sample_dataset.jsonl")
+DATA_PATH = os.getenv("DATA_PATH", "C:/Users/user/Documents/Python program/kafka-llm-pipeline/sample_dataset.jsonl")
 MIN_DELAY = float(os.getenv("MIN_DELAY_SEC", "0.05"))
 MAX_DELAY = float(os.getenv("MAX_DELAY_SEC", "0.5"))
 

@@ -1,0 +1,6 @@
+artifact_location: file:///C:/Users/user/Documents/Python%20program/kafka-llm-pipeline/mlruns/522572174175578353
+creation_time: 1785399981305
+experiment_id: '522572174175578353'
+last_update_time: 1785399981305
+lifecycle_stage: active
+name: kafka-llm-streaming-finetune
