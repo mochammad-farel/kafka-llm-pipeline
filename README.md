@@ -1,11 +1,11 @@
 # Kafka-Powered Streaming Pipeline for LLM Training (Llama 3.2 3B)
 
-Pipeline yang mensimulasikan ingestion data real-time via Apache Kafka, melakukan
-cleaning/preprocessing/micro-batching secara streaming, lalu menjalankan
-incremental fine-tuning (LoRA/QLoRA) pada Llama 3.2 3B setiap kali cukup data baru
-terkumpul.
+A pipeline that simulates real-time data ingestion via Apache Kafka, performs
+cleaning/preprocessing/micro-batching in a streaming fashion, then runs
+incremental fine-tuning (LoRA/QLoRA) on Llama 3.2 3B every time enough new
+data has accumulated.
 
-## Arsitektur
+## Architecture
 
 ```
 Data source -> Kafka producer -> Kafka (raw-stream / processed-stream / dlq)
@@ -14,15 +14,15 @@ Data source -> Kafka producer -> Kafka (raw-stream / processed-stream / dlq)
             -> Registry (checkpoint adapter) + MLflow (metrics/logs)
 ```
 
-## Prasyarat
+## Prerequisites
 
 - Docker & Docker Compose
 - Python 3.10+
-- GPU dengan minimal ~8-12 GB VRAM (untuk 4-bit QLoRA). Tanpa GPU, ganti
-  `finetune_llama.py` untuk memakai model yang jauh lebih kecil (mis. `Qwen2.5-0.5B`)
-  agar tetap bisa didemokan di CPU/Colab.
-- Akses ke model gated `meta-llama/Llama-3.2-3B` di Hugging Face (request akses
-  di halaman model, lalu `huggingface-cli login`).
+- A GPU with at least ~8-12 GB VRAM (for 4-bit QLoRA). Without a GPU, swap
+  `finetune_llama.py` to use a much smaller model (e.g. `Qwen2.5-0.5B`) so it
+  can still be demoed on CPU/Colab.
+- Access to the gated `meta-llama/Llama-3.2-3B` model on Hugging Face (request
+  access on the model page, then run `huggingface-cli login`).
 
 ## Setup
 
@@ -30,139 +30,142 @@ Data source -> Kafka producer -> Kafka (raw-stream / processed-stream / dlq)
 cd kafka-llm-pipeline
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env   # sesuaikan value kalau perlu
+cp .env.example .env   # adjust values if needed
 ```
 
-Jalankan Kafka:
+Start Kafka:
 
 ```bash
 docker compose up -d
 ```
 
-Kafka UI tersedia di `http://localhost:8080` untuk memantau topic dan pesan secara visual.
+The Kafka UI is available at `http://localhost:8080` for visually monitoring topics and messages.
 
-## Menjalankan pipeline
+## Running the pipeline
 
-Buka 3 terminal terpisah:
+Open 3 separate terminals:
 
-**Terminal 1 — Stream processor (jalankan lebih dulu, supaya siap menerima pesan)**
+**Terminal 1 — Stream processor (run this first, so it's ready to receive messages)**
 ```bash
 python consumer/preprocessor.py
 ```
 
-**Terminal 2 — Producer (simulasi data masuk)**
+**Terminal 2 — Producer (simulates incoming data)**
 ```bash
 python producer/stream_producer.py
 ```
 
 **Terminal 3 — Training service**
 ```bash
-# one-shot: proses batch yang tersedia lalu keluar
+# one-shot: process the available batch then exit
 python training/finetune_llama.py
 
-# atau watch mode: terus memantau & training tiap ada batch baru
+# or watch mode: keep monitoring & train whenever a new batch arrives
 python training/finetune_llama.py --watch
 ```
 
-Lihat progres training (loss, params) di MLflow UI:
+Watch training progress (loss, params) in the MLflow UI:
 ```bash
 mlflow ui
 ```
 
-## Registry checkpoint
+## Checkpoint registry
 
 ```bash
-# lihat semua checkpoint adapter yang tersimpan
+# list all saved adapter checkpoints
 python registry/checkpoint_manager.py --list
 
-# push salah satu checkpoint ke Hugging Face Hub (private repo)
+# push a checkpoint to the Hugging Face Hub (private repo)
 python registry/checkpoint_manager.py --push adapter_20260728_101500
 ```
 
 ## Testing inference
 
-Setelah punya minimal 1 checkpoint, bandingkan output base model vs model hasil fine-tuning:
+Once you have at least 1 checkpoint, compare the base model's output against the fine-tuned model's:
 
 ```bash
-# bandingkan base model vs fine-tuned untuk 3 instruksi contoh
+# compare base model vs fine-tuned for 3 sample instructions
 python inference/test_inference.py --compare-base
 
-# instruksi custom, dengan panjang output lebih lega
-python inference/test_inference.py --compare-base --prompt "Jelaskan apa itu Kafka" --max-new-tokens 300
+# custom instruction, with more room for output length
+python inference/test_inference.py --compare-base --prompt "Explain what Kafka is" --max-new-tokens 300
 
-# test checkpoint tertentu (bukan yang paling baru)
+# test a specific checkpoint (not just the latest)
 python inference/test_inference.py --checkpoint adapter_20260805_103719 --compare-base
 ```
 
-Script ini memuat base model 4-bit sekali saja, lalu memakai `model.disable_adapter()`
-dari `peft` untuk membandingkan perilaku dengan/tanpa adapter LoRA — tanpa perlu
-load model dua kali.
+This script loads the 4-bit base model only once, then uses `model.disable_adapter()`
+from `peft` to compare behavior with/without the LoRA adapter — without needing
+to load the model twice.
 
 ## Evaluation & Findings
 
-Hasil dari checkpoint `adapter_20260805_103719` (1 epoch, ~3000 sample dari subset
-`teknium/OpenHermes-2.5`), dibandingkan base model, untuk 3 instruksi domain teknis:
+Results from checkpoint `adapter_20260805_103719` (1 epoch, ~3000 samples from a
+subset of `teknium/OpenHermes-2.5`), compared against the base model, for 3
+technical-domain instructions:
 
-**1. Disambiguasi istilah — perubahan paling jelas**
+**1. Term disambiguation — the clearest change**
 
-Ditanya "Jelaskan konsep LoRA dalam fine-tuning model bahasa", base model salah
-total: ia mengira LoRA merujuk ke LoRaWAN (teknologi radio jarak jauh untuk IoT).
-Model fine-tuned berhasil mengarahkan jawaban ke domain yang benar (low-rank
-adaptation untuk fine-tuning), meski detail teknis lanjutannya masih tidak akurat
-(halusinasi soal "basis Fourier" dan TTS). Ini indikasi paling jelas bahwa training
-berhasil menggeser model ke arah domain data training (ML/LLM engineering), bukan
-sekadar noise.
+When asked "Explain the concept of LoRA in language model fine-tuning," the base
+model got it completely wrong: it thought LoRA referred to LoRaWAN (a long-range
+radio technology for IoT). The fine-tuned model correctly steered the answer
+toward the right domain (low-rank adaptation for fine-tuning), even though
+further technical details were still inaccurate (hallucinating about a "Fourier
+basis" and TTS). This is the clearest evidence that training successfully shifted
+the model toward the training data's domain (ML/LLM engineering), rather than
+just being noise.
 
-**2. Language drift — model beralih ke Bahasa Inggris**
+**2. Language drift — the model switches to English**
 
-Untuk pertanyaan Kafka, base model konsisten menjawab dalam Bahasa Indonesia
-(sesuai bahasa prompt), tapi model fine-tuned menjawab penuh dalam Bahasa Inggris.
-Ini kemungkinan besar karena dataset `OpenHermes-2.5` didominasi teks Inggris —
-bahkan porsi kecil dari 1 epoch training sudah cukup menggeser preferensi bahasa
-model. Ini fenomena nyata dalam fine-tuning (*language drift*/*catastrophic
-forgetting* parsial), bukan bug pipeline.
+For the Kafka question, the base model consistently answered in Indonesian
+(matching the prompt's language), but the fine-tuned model answered entirely in
+English. This is most likely because the `OpenHermes-2.5` dataset is dominated
+by English text — even a small portion of 1 epoch of training was enough to
+shift the model's language preference. This is a real phenomenon in fine-tuning
+(*language drift*/partial *catastrophic forgetting*), not a pipeline bug.
 
-**3. Jawaban lebih terstruktur, tapi rawan halusinasi detail**
+**3. More structured answers, but prone to hallucinated details**
 
-Secara umum, jawaban fine-tuned lebih panjang dan terstruktur (poin bernomor,
-penjelasan istilah teknis) dibanding base model yang lebih ringkas. Trade-off-nya:
-detail spesifik (statistik, nama produk, klaim teknis presisi) tidak selalu akurat
-— wajar untuk training skala kecil (1 epoch, ribuan bukan jutaan sample).
+Overall, the fine-tuned model's answers are longer and more structured (numbered
+points, explanations of technical terms) compared to the more concise base
+model. The trade-off: specific details (statistics, product names, precise
+technical claims) aren't always accurate — expected for small-scale training
+(1 epoch, thousands rather than millions of samples).
 
-### Rekomendasi perbaikan lanjutan
+### Recommendations for further improvement
 
-- **Mitigasi language drift**: campurkan data Bahasa Indonesia (misal
-  `FreedomIntelligence/alpaca-gpt4-indonesian`) ke dalam training set, atau
-  filter subset OpenHermes ke percakapan yang sudah berbahasa Indonesia saja.
-- **Kurangi halusinasi**: perbesar jumlah sample training dan/atau jumlah epoch,
-  dengan tetap memantau `train_loss` di MLflow supaya tidak overfitting ke
-  dataset kecil.
-- **Evaluasi lebih sistematis**: dibanding cuma baca output secara manual,
-  pertimbangkan metrik otomatis (perplexity pada held-out set, atau LLM-as-judge)
-  untuk membandingkan checkpoint secara kuantitatif saat pipeline `--watch`
-  menghasilkan banyak checkpoint dari waktu ke waktu.
+- **Mitigate language drift**: mix Indonesian-language data (e.g.
+  `FreedomIntelligence/alpaca-gpt4-indonesian`) into the training set, or filter
+  the OpenHermes subset down to conversations that are already in Indonesian.
+- **Reduce hallucination**: increase the number of training samples and/or
+  epochs, while monitoring `train_loss` in MLflow to avoid overfitting to a
+  small dataset.
+- **More systematic evaluation**: instead of just reading outputs manually,
+  consider automated metrics (perplexity on a held-out set, or LLM-as-judge) to
+  quantitatively compare checkpoints as the `--watch` pipeline produces many
+  checkpoints over time.
 
-## Catatan implementasi
+## Implementation notes
 
-- **Micro-batching**: `preprocessor.py` mem-flush buffer ke file JSONL berdasarkan
-  `BATCH_SIZE` (jumlah pesan) atau `BATCH_FLUSH_SEC` (interval waktu), mana yang
-  tercapai lebih dulu — pola windowing standar pada stream processing.
-- **DLQ**: pesan yang gagal parsing, terlalu pendek, duplikat, atau melebihi
-  `MAX_TOKEN_LEN` dikirim ke topic `dlq` alih-alih di-drop diam-diam, supaya bisa
-  diinspeksi.
-- **Incremental fine-tuning**: setiap training cycle melanjutkan dari adapter
-  checkpoint terakhir (`PeftModel.from_pretrained(..., is_trainable=True)`),
-  bukan training ulang dari base model — ini yang membedakan pipeline ini dari
-  batch training biasa.
-- **Skala demo vs produksi**: `MIN_BATCHES_TO_TRAIN` kecil (default 3) supaya
-  gampang didemokan dengan `data/sample_dataset.jsonl`. Untuk dataset besar,
-  naikkan nilainya dan pertimbangkan menjalankan training service di GPU terpisah
-  dari stream processor.
+- **Micro-batching**: `preprocessor.py` flushes its buffer to a JSONL file based
+  on `BATCH_SIZE` (message count) or `BATCH_FLUSH_SEC` (time interval), whichever
+  is reached first — a standard windowing pattern in stream processing.
+- **DLQ**: messages that fail to parse, are too short, are duplicates, or exceed
+  `MAX_TOKEN_LEN` are sent to the `dlq` topic instead of being silently dropped,
+  so they can be inspected.
+- **Incremental fine-tuning**: each training cycle continues from the last
+  adapter checkpoint (`PeftModel.from_pretrained(..., is_trainable=True)`),
+  rather than retraining from the base model — this is what distinguishes this
+  pipeline from ordinary batch training.
+- **Demo scale vs. production**: `MIN_BATCHES_TO_TRAIN` is small (default 3) so
+  it's easy to demo with `data/sample_dataset.jsonl`. For larger datasets,
+  increase this value and consider running the training service on a separate
+  GPU from the stream processor.
 
-## Ide pengembangan lanjutan
+## Further development ideas
 
-- Tambahkan Prometheus exporter untuk Kafka consumer lag + dashboard Grafana.
-- Ganti penyimpanan batch dari file lokal ke object storage (S3/MinIO) untuk
-  setup multi-node.
-- Tambahkan endpoint FastAPI untuk trigger training manual atau cek status cycle
-  terakhir.
+- Add a Prometheus exporter for Kafka consumer lag plus a Grafana dashboard.
+- Switch batch storage from local files to object storage (S3/MinIO) for
+  multi-node setups.
+- Add a FastAPI endpoint to trigger training manually or check the status of the
+  last cycle.
